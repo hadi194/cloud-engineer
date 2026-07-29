@@ -10,8 +10,8 @@ A learning guide for the fullstack project. Read top to bottom. Every command is
 Browser
   │
   ▼
-Next.js (frontend :3000)
-  │  rewrites /auth/* and /api/* via Next.js proxy
+React + Nginx (frontend :3000)
+  │  Nginx proxies /auth/* and /api/* to Go backend
   ▼
 Go API (backend :8080)
   ├── PostgreSQL (database :5432)
@@ -21,7 +21,7 @@ Go API (backend :8080)
 
 | Problem | Tool | Local replacement for |
 |---|---|---|
-| Web UI | Next.js | — |
+| Web UI | React + Vite | — |
 | REST API | Go + Gin | — |
 | Database | PostgreSQL | — |
 | File / image storage | MinIO | AWS S3 |
@@ -91,12 +91,14 @@ fullstack/
 │       │   └── cors.go       allow browser to call the API
 │       └── storage/minio.go  talk to MinIO (local S3)
 │
-├── frontend/             Next.js web app
-│   ├── next.config.mjs   rewrites /auth/* and /api/* to Go backend
-│   ├── src/app/
-│   │   ├── login/page.tsx    login form
-│   │   ├── dashboard/page.tsx  users table
-│   │   └── upload/page.tsx   image upload
+├── frontend/             React + Vite web app (served by Nginx)
+│   ├── vite.config.ts    Vite dev proxy for /auth/* and /api/*
+│   ├── nginx.conf        Nginx proxy config (used in Docker/K8s)
+│   ├── src/App.tsx       React Router setup + PrivateRoute guard
+│   ├── src/pages/
+│   │   ├── Login.tsx         login form
+│   │   ├── Dashboard.tsx     users table
+│   │   └── Upload.tsx        image upload
 │   └── src/lib/api.ts    fetch helpers used by all pages
 │
 ├── monitoring/
@@ -152,11 +154,11 @@ docker compose up --build
 1. PostgreSQL starts, waits until healthy (`pg_isready` passes)
 2. MinIO starts, waits until healthy (HTTP `/minio/health/live` returns 200)
 3. Backend starts — connects to Postgres, runs DB migration, seeds 6 users, connects to MinIO, creates the `uploads` bucket
-4. Frontend starts — builds Next.js, starts the Node server
+4. Frontend starts — runs `npm run build` (Vite), Nginx serves the output
 5. Prometheus starts — begins scraping metrics from backend every 15s
 6. Grafana starts — reads datasources config, connects to Prometheus
 
-First run takes 2-5 minutes (downloading images, building Go binary, building Next.js). Subsequent runs are much faster.
+First run takes 2-5 minutes (downloading images, building Go binary, building React app). Subsequent runs are much faster.
 
 ### Step 3 — Verify each service is healthy
 
@@ -275,7 +277,7 @@ Open http://localhost:3000 in your browser.
 5. After upload, the image URL appears and the image is shown inline
 
 **Why can the browser call `/api/users` without specifying the backend URL?**
-Look at `frontend/next.config.mjs`. It defines `rewrites`: any request from the browser to `/api/*` is transparently forwarded by the Next.js server to `http://backend:8080/api/*`. The browser only ever talks to the Next.js server (port 3000). This is the BFF (Backend for Frontend) proxy pattern — no CORS needed.
+Look at `frontend/nginx.conf`. Nginx proxies any `/api/*` and `/auth/*` request to `http://backend:8080`. In dev (`npm run dev`), Vite does the same via `vite.config.ts`. The browser only ever talks to port 3000 — no CORS needed.
 
 ### Step 8 — Explore MinIO
 
@@ -364,17 +366,22 @@ MinIO implements the AWS S3 REST API exactly. The same `minio-go` client library
 
 The upload code in `storage/minio.go` would work unchanged against real S3 with only env var changes. That's the point — you learn S3 patterns without the bill.
 
-### How Next.js rewrites eliminate CORS problems
+### How Nginx/Vite proxy eliminates CORS problems
 
-Without the rewrite proxy:
+Without the proxy:
 - Browser is on `http://localhost:3000`
 - It tries to call `http://localhost:8080/api/users`
 - Browser blocks it: different port = different origin = CORS policy violation
 
-With Next.js rewrites:
+With Vite proxy (dev) / Nginx proxy (production):
 - Browser calls `http://localhost:3000/api/users` (same origin ✅)
-- Next.js server (not the browser) calls `http://backend:8080/api/users`
+- Vite/Nginx (not the browser) forwards request to `http://backend:8080/api/users`
 - Browser never sees a cross-origin request
+
+```
+Dev:   vite.config.ts  → proxy: { '/api': 'http://localhost:8080' }
+Prod:  nginx.conf      → location /api/ { proxy_pass http://backend:8080/api/; }
+```
 
 ---
 
@@ -670,9 +677,9 @@ kubectl logs -n fullstack <pod-name> --previous
 
 Make sure you're inside the `backend/` directory (where `go.mod` lives) and that you have internet access.
 
-### Next.js build fails in Docker
+### React/Vite build fails in Docker
 
-Usually a TypeScript error. Run locally first to see the error:
+Usually a TypeScript error. Run locally first to see the exact error:
 ```bash
 cd frontend && npm install && npm run build
 ```
