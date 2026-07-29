@@ -1,0 +1,25 @@
+# Go
+backend/vendor/
+backend/*.exe
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/dist/
+
+# Env files (never commit secrets)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# K8s secrets (real secrets should not be committed)
+# k8s/*/secret.yaml  ← uncomment in production
